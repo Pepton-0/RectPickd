@@ -15,15 +15,34 @@ public final class Consts {
     /**
      * Maximum distance in GUI-scaled pixels for snapping a transfer target to the nearest inventory.
      */
-    public static final double transferTargetSnapDistance = 8.0;
+    public static final double transferTargetSnapDistance = 10;
+
+    /**
+     * Language key used by the pick key mapping.
+     */
+    public static final String pickKeyTranslationKey = "key.rectpick.pick";
+
+    /**
+     * Language key used for the RectPick controls category.
+     */
+    public static final String keyCategoryTranslationKey = "key.categories.rectpick";
+
+    /**
+     * Client ticks to wait for delayed transfer feedback after a server-side inventory sync.
+     */
+    public static final int transferFeedbackWaitTicks = 10;
+
+    /**
+     * Forces client-side transfer fallback for debugging instead of sending RectPick server payloads.
+     */
+    public static final boolean disableServerTransferForDebug = false;
 
     private static Consts instance;
 
-    private final String pickKeyTranslationKey;
-    private final String keyCategoryTranslationKey;
     private final int defaultPickKey;
     private final double moveOperationMaxDragDistance;
     private final int selectionOutlineColor;
+    private final int selectionFillColor;
     private final int selectedSlotFillColor;
     private final int movedSlotFillColor;
     private final double selectedSlotFadeInSeconds;
@@ -36,11 +55,10 @@ public final class Consts {
      * @param loader config loader that must return valid, non-null string values and sane numeric values.
      */
     private Consts(IConfigLoader loader) {
-        this.pickKeyTranslationKey = loader.getPickKeyTranslationKey();
-        this.keyCategoryTranslationKey = loader.getKeyCategoryTranslationKey();
         this.defaultPickKey = loader.getDefaultPickKey();
         this.moveOperationMaxDragDistance = loader.getMoveOperationMaxDragDistance();
         this.selectionOutlineColor = loader.getSelectionOutlineColor();
+        this.selectionFillColor = loader.getSelectionFillColor();
         this.selectedSlotFillColor = loader.getSelectedSlotFillColor();
         this.movedSlotFillColor = loader.getMovedSlotFillColor();
         this.selectedSlotFadeInSeconds = loader.getSelectedSlotFadeInSeconds();
@@ -77,24 +95,6 @@ public final class Consts {
     }
 
     /**
-     * Returns the language key used by the pick key mapping.
-     *
-     * @return the configured translation key without further processing.
-     */
-    public String pickKeyTranslationKey() {
-        return pickKeyTranslationKey;
-    }
-
-    /**
-     * Returns the language key used for the RectPick controls category.
-     *
-     * @return the configured category translation key without further processing.
-     */
-    public String keyCategoryTranslationKey() {
-        return keyCategoryTranslationKey;
-    }
-
-    /**
      * Returns the default GLFW key code for the pick key.
      *
      * @return the configured GLFW key code without remapping.
@@ -119,6 +119,15 @@ public final class Consts {
      */
     public int selectionOutlineColor() {
         return selectionOutlineColor;
+    }
+
+    /**
+     * Returns the ARGB color used for the active selection rectangle fill.
+     *
+     * @return configured ARGB color value.
+     */
+    public int selectionFillColor() {
+        return selectionFillColor;
     }
 
     /**

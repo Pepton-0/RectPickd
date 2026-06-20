@@ -3,7 +3,6 @@ package org.pepton.rectpick.client;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
-import net.neoforged.neoforge.client.extensions.IKeyMappingExtension;
 import net.neoforged.neoforge.client.settings.KeyConflictContext;
 import org.pepton.rectpick.config.Consts;
 
@@ -27,11 +26,11 @@ public final class ClientKeyMappings {
     public static void register(RegisterKeyMappingsEvent event) {
         Consts consts = Consts.get();
         pickKey = new KeyMapping(
-                consts.pickKeyTranslationKey(),
+                Consts.pickKeyTranslationKey,
                 KeyConflictContext.GUI,
                 InputConstants.Type.KEYSYM,
                 consts.defaultPickKey(),
-                consts.keyCategoryTranslationKey()
+                Consts.keyCategoryTranslationKey
         );
 
         event.register(pickKey);

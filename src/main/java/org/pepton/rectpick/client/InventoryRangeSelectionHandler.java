@@ -6,13 +6,23 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.events.ContainerEventHandler;
+import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.Container;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
+import org.pepton.rectpick.api.Ae2Api;
+import org.pepton.rectpick.api.EmiApi;
+import org.pepton.rectpick.api.JeiApi;
+import org.pepton.rectpick.api.ReiApi;
 import org.pepton.rectpick.config.Consts;
 import org.slf4j.Logger;
 
@@ -31,6 +41,7 @@ public final class InventoryRangeSelectionHandler {
     private boolean pickKeyWasDown;
     private int selectedMenuId = -1;
     private List<Integer> selectedSourceSlotIndices = List.of();
+    private PendingTransferFeedback pendingTransferFeedback;
     private final RectPickSelectionRenderer renderer;
 
     /**
@@ -45,7 +56,7 @@ public final class InventoryRangeSelectionHandler {
     /**
      * Handles screen key press events for PICK_KEY.
      *
-     * @param event key press event from a visible screen; only events matching PICK_KEY in GUI context are consumed.
+     * @param event key press event from a visible screen; repeated PICK_KEY events are ignored while the key is marked down.
      */
     @SubscribeEvent
     public void onKeyPressed(ScreenEvent.KeyPressed.Pre event) {
@@ -53,13 +64,22 @@ public final class InventoryRangeSelectionHandler {
             return;
         }
 
+        if (pickKeyWasDown) {
+            return;
+        }
+
+        if (shouldIgnorePickKeyInput(event.getScreen())) {
+            return;
+        }
+
+        pickKeyWasDown = true;
         handlePickKeyDown(event.getScreen(), "screen key press");
     }
 
     /**
      * Handles screen key release events for PICK_KEY.
      *
-     * @param event key release event from a visible screen; only events matching PICK_KEY in GUI context are consumed.
+     * @param event key release event from a visible screen; duplicate release events are ignored when the key is not marked down.
      */
     @SubscribeEvent
     public void onKeyReleased(ScreenEvent.KeyReleased.Pre event) {
@@ -67,6 +87,16 @@ public final class InventoryRangeSelectionHandler {
             return;
         }
 
+        if (!pickKeyWasDown) {
+            if (shouldIgnorePickKeyInput(event.getScreen())) {
+                return;
+            }
+
+            debugLog("RectPick pick key up ignored because PICK_KEY was not marked down; source=screen key release");
+            return;
+        }
+
+        pickKeyWasDown = false;
         handlePickKeyUp(event.getScreen(), "screen key release");
     }
 
@@ -78,17 +108,21 @@ public final class InventoryRangeSelectionHandler {
     @SubscribeEvent
     public void onClientTick(ClientTickEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
+        updatePendingTransferFeedback(minecraft.screen);
+
         boolean pickKeyDown = ClientKeyMappings.isPickKeyDown(minecraft.getWindow().getWindow());
 
         if (pickKeyDown && !pickKeyWasDown) {
+            if (shouldIgnorePickKeyInput(minecraft.screen)) {
+                return;
+            }
+
+            pickKeyWasDown = true;
             handlePickKeyDown(minecraft.screen, "client tick");
         } else if (!pickKeyDown && pickKeyWasDown) {
+            pickKeyWasDown = false;
             handlePickKeyUp(minecraft.screen, "client tick");
-        } else if (pickKeyDown) {
-            updateActiveSelection(minecraft.screen);
         }
-
-        pickKeyWasDown = pickKeyDown;
     }
 
     /**
@@ -101,6 +135,7 @@ public final class InventoryRangeSelectionHandler {
         if (event.getScreen() instanceof AbstractContainerScreen<?>) {
             clearSelectionState();
             clearStoredSelection();
+            pendingTransferFeedback = null;
             renderer.clearAll();
             pickKeyWasDown = false;
         }
@@ -122,7 +157,7 @@ public final class InventoryRangeSelectionHandler {
         }
 
         try {
-            boolean firstDown = !pickKeyWasDown && selectedSourceSlotIndices.isEmpty();
+            boolean firstDown = selectedSourceSlotIndices.isEmpty();
             startPos = currentGuiMousePosition();
             endPos = null;
             renderer.beginSelection(startPos);
@@ -176,13 +211,14 @@ public final class InventoryRangeSelectionHandler {
         }
 
         try {
-            if (localStart.isSamePosition(localEnd) && !selectedSourceSlotIndices.isEmpty()) {
+            GuiRect selectionRect = GuiRect.fromTwoPoints(localStart, localEnd);
+            List<Integer> candidateSelectedSlots = collectIntersectingSlots(containerScreen, selectionRect, false);
+
+            if ((localStart.isSamePosition(localEnd)) && !selectedSourceSlotIndices.isEmpty()) {
                 handleTransferGesture(containerScreen, localStart, localEnd, "point");
                 return;
             }
 
-            GuiRect selectionRect = GuiRect.fromTwoPoints(localStart, localEnd);
-            List<Integer> candidateSelectedSlots = collectIntersectingSlots(containerScreen, selectionRect, false);
             if (shouldTreatAsTransferGesture(localStart, localEnd, candidateSelectedSlots)) {
                 handleTransferGesture(containerScreen, localStart, localEnd, "drag tolerance");
                 return;
@@ -213,7 +249,7 @@ public final class InventoryRangeSelectionHandler {
      * @return {@code true} when stored source slots exist and the drag is empty or within configured tolerance.
      */
     private boolean shouldTreatAsTransferGesture(GuiPoint start, GuiPoint end, List<Integer> candidateSelectedSlots) {
-        if (selectedSourceSlotIndices.size() < 2) {
+        if (selectedSourceSlotIndices.isEmpty()) {
             return false;
         }
 
@@ -222,7 +258,7 @@ public final class InventoryRangeSelectionHandler {
         boolean smallDrag = dragDistance <= Consts.get().moveOperationMaxDragDistance();
         if (emptyRange || smallDrag) {
             debugLog(
-                    "RectPick treating drag as transfer gesture: emptyRange={}, dragDistance={}, tolerance={}",
+                    "RectPick treating drag as transfer gesture: emptyRange={}, dragDistance={}, maxTolerance={}",
                     emptyRange,
                     dragDistance,
                     Consts.get().moveOperationMaxDragDistance()
@@ -234,28 +270,98 @@ public final class InventoryRangeSelectionHandler {
     }
 
     /**
-     * Updates the renderer with the current mouse position during an active PICK_KEY gesture.
+     * Checks whether PICK_KEY should be ignored because the user is typing into a focused text field.
      *
-     * @param screen current screen object; must be an {@link AbstractContainerScreen} to keep drawing the active rectangle.
+     * @param screen current screen object; non-screen objects are treated as not typing.
+     * @return {@code true} when an active text field should receive the key instead of RectPick.
      */
-    private void updateActiveSelection(Object screen) {
-        if (startPos == null) {
-            return;
+    private boolean shouldIgnorePickKeyInput(Object screen) {
+        if (!(screen instanceof Screen currentScreen)) {
+            return false;
         }
 
-        if (!(screen instanceof AbstractContainerScreen<?>)) {
-            clearSelectionState();
-            renderer.endSelection();
-            return;
+        return findActiveTextField(currentScreen) != null || isItemsSearchFieldFocused();
+    }
+
+    /**
+     * Finds a visible text field that is currently able to consume keyboard input on the screen.
+     *
+     * @param screen current GUI screen; must not be {@code null}.
+     * @return focused text field that can consume input, or {@code null} when no text field is accepting typing.
+     */
+    private EditBox findActiveTextField(Screen screen) {
+        GuiEventListener focused = screen.getFocused();
+        if (isActiveTextField(focused)) {
+            return (EditBox) focused;
         }
 
-        try {
-            renderer.updateSelection(startPos, currentGuiMousePosition());
-        } catch (Exception exception) {
-            clearSelectionState();
-            renderer.endSelection();
-            LOGGER.error("Failed to update RectPick selection renderer", exception);
+        for (GuiEventListener child : screen.children()) {
+            EditBox activeTextField = findActiveTextField(child);
+            if (activeTextField != null) {
+                return activeTextField;
+            }
         }
+
+        return null;
+    }
+
+    /**
+     * Finds a visible text field under one GUI listener, recursing into listener containers.
+     *
+     * @param listener screen child or focused element to inspect.
+     * @return active text field under the listener, or {@code null} when none is accepting typing.
+     */
+    private EditBox findActiveTextField(GuiEventListener listener) {
+        if (isActiveTextField(listener)) {
+            return (EditBox) listener;
+        }
+
+        if (!(listener instanceof ContainerEventHandler container)) {
+            return null;
+        }
+
+        GuiEventListener focused = container.getFocused();
+        if (focused != null && focused != listener) {
+            EditBox activeTextField = findActiveTextField(focused);
+            if (activeTextField != null) {
+                return activeTextField;
+            }
+        }
+
+        for (GuiEventListener child : container.children()) {
+            if (child == listener) {
+                continue;
+            }
+
+            EditBox activeTextField = findActiveTextField(child);
+            if (activeTextField != null) {
+                return activeTextField;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Checks whether one GUI listener is a text field that should own keyboard input.
+     *
+     * @param listener screen child or focused element to test.
+     * @return {@code true} when the listener is a visible edit box that can consume typed input.
+     */
+    private boolean isActiveTextField(GuiEventListener listener) {
+        return listener instanceof EditBox editBox && editBox.isVisible() && editBox.canConsumeInput();
+    }
+
+    /**
+     * Checks item viewer search boxes through each installed viewer's public API.
+     *
+     * @return {@code true} when JEI, EMI, or REI is loaded and its search field owns keyboard focus.
+     */
+    private boolean isItemsSearchFieldFocused() {
+        ModList modList = ModList.get();
+        return (modList.isLoaded("jei") && JeiApi.isSearchFieldFocused())
+                || (modList.isLoaded("emi") && EmiApi.isSearchFieldFocused())
+                || (modList.isLoaded("roughlyenoughitems") && ReiApi.isSearchFieldFocused());
     }
 
     /**
@@ -295,11 +401,11 @@ public final class InventoryRangeSelectionHandler {
             }
 
             if (slot.hasItem()) {
-                selectedSlots.add(slot.index);
+                selectedSlots.add(menuIndexOfSlot(screen.getMenu(), slot));
             }
 
             if (logHits) {
-                logSlot(slot);
+                logSlot(screen.getMenu(), slot);
             }
         }
 
@@ -315,6 +421,8 @@ public final class InventoryRangeSelectionHandler {
      * @param reason short reason logged to explain why this gesture became a transfer.
      */
     private void handleTransferGesture(AbstractContainerScreen<?> screen, GuiPoint start, GuiPoint end, String reason) {
+        pendingTransferFeedback = null;
+
         if (selectedSourceSlotIndices.isEmpty()) {
             debugLog("RectPick transfer ignored because no source slots are selected");
             return;
@@ -339,16 +447,19 @@ public final class InventoryRangeSelectionHandler {
                     start.x(),
                     start.y()
             );
+            clearStoredSelection(); // TODO might be inconvenient if the target inventory has shit hitbox
             return;
         }
 
+        int targetSlotIndex = menuIndexOfSlot(screen.getMenu(), targetSlot);
         int sameInventorySourceCount = countSelectedSourceSlotsInTargetInventory(screen, targetSlot);
         if (sameInventorySourceCount == selectedSourceSlotIndices.size()) {
             debugLog(
                     "RectPick transfer target is in the same inventory as all selected source slots; cancelling stored selection: targetMenuSlot={}, targetContainerSlot={}",
-                    targetSlot.index,
+                    targetSlotIndex,
                     targetSlot.getContainerSlot()
             );
+            ClientOperationSounds.playOperationIgnored();
             clearStoredSelection();
             return;
         }
@@ -362,19 +473,70 @@ public final class InventoryRangeSelectionHandler {
 
         debugLog(
                 "RectPick transfer requested: targetMenuSlot={}, targetContainerSlot={}, selectedSourceSlots={}, reason={}",
-                targetSlot.index,
+                targetSlotIndex,
                 targetSlot.getContainerSlot(),
                 selectedSourceSlotIndices,
                 reason
         );
 
-        List<Integer> movedSlotIndices = List.copyOf(selectedSourceSlotIndices);
-        if (ClientInventoryTransferDispatcher.transfer(screen.getMenu(), targetSlot.index, selectedSourceSlotIndices)) {
-            renderer.showMovedSlots(screen.getMenu().containerId, movedSlotIndices);
+        boolean stackUnitTransfer = Screen.hasShiftDown();
+        ClientInventoryTransferDispatcher.TransferDispatchResult transferResult =
+                ClientInventoryTransferDispatcher.transfer(screen.getMenu(), targetSlotIndex, selectedSourceSlotIndices, stackUnitTransfer);
+        if (transferResult.destinationChanged()) {
+            renderer.showMovedSlots(screen.getMenu().containerId, transferResult.movedDestinationSlotIndices());
             ClientOperationSounds.playTransferDone();
+        } else if (transferResult.transferred() && transferResult.delayedSyncExpected()) {
+            pendingTransferFeedback = new PendingTransferFeedback(
+                    screen.getMenu().containerId,
+                    transferResult.beforeDestinationSnapshots(),
+                    Consts.transferFeedbackWaitTicks
+            );
+        } else {
+            ClientOperationSounds.playOperationIgnored();
         }
 
         clearStoredSelection();
+    }
+
+    /**
+     * Checks delayed server-side transfer feedback and plays exactly one completion or ignored sound.
+     *
+     * @param screen current screen object; only the menu that started the transfer can complete pending feedback.
+     */
+    private void updatePendingTransferFeedback(Object screen) {
+        if (pendingTransferFeedback == null) {
+            return;
+        }
+
+        if (!(screen instanceof AbstractContainerScreen<?> containerScreen)
+                || containerScreen.getMenu().containerId != pendingTransferFeedback.menuId()) {
+            pendingTransferFeedback = null;
+            return;
+        }
+
+        List<Integer> changedDestinationSlotIndices = ClientInventoryTransferDispatcher.changedDestinationSlotIndices(
+                containerScreen.getMenu(),
+                pendingTransferFeedback.beforeDestinationSnapshots()
+        );
+        if (!changedDestinationSlotIndices.isEmpty()) {
+            renderer.showMovedSlots(containerScreen.getMenu().containerId, changedDestinationSlotIndices);
+            ClientOperationSounds.playTransferDone();
+            pendingTransferFeedback = null;
+            return;
+        }
+
+        int remainingTicks = pendingTransferFeedback.remainingTicks() - 1;
+        if (remainingTicks <= 0) {
+            ClientOperationSounds.playOperationIgnored();
+            pendingTransferFeedback = null;
+            return;
+        }
+
+        pendingTransferFeedback = new PendingTransferFeedback(
+                pendingTransferFeedback.menuId(),
+                pendingTransferFeedback.beforeDestinationSnapshots(),
+                remainingTicks
+        );
     }
 
     /**
@@ -434,6 +596,7 @@ public final class InventoryRangeSelectionHandler {
      * @return active slot containing the point, or {@code null} when no slot contains it.
      */
     private Slot findSlotAt(AbstractContainerScreen<?> screen, GuiPoint point) {
+        Slot firstHit = null;
         for (Slot slot : screen.getMenu().slots) {
             if (!slot.isActive()) {
                 continue;
@@ -444,12 +607,31 @@ public final class InventoryRangeSelectionHandler {
             double slotRight = slotLeft + SLOT_SIZE;
             double slotBottom = slotTop + SLOT_SIZE;
 
-            if (point.x() >= slotLeft && point.x() < slotRight && point.y() >= slotTop && point.y() < slotBottom) {
+            if (point.x() < slotLeft || point.x() >= slotRight || point.y() < slotTop || point.y() >= slotBottom) {
+                continue;
+            }
+
+            if (isAe2StorageSlot(screen.getMenu(), slot)) {
                 return slot;
+            }
+
+            if (firstHit == null) {
+                firstHit = slot;
             }
         }
 
-        return null;
+        return firstHit;
+    }
+
+    /**
+     * Checks whether a slot represents AE2 terminal storage and should win hit-test ties.
+     *
+     * @param menu menu that owns the slot.
+     * @param slot slot hit by the cursor.
+     * @return {@code true} when AE2 is loaded and the slot points at terminal storage.
+     */
+    private boolean isAe2StorageSlot(AbstractContainerMenu menu, Slot slot) {
+        return ModList.get().isLoaded("ae2") && Ae2Api.isStorageTarget(menu, menuIndexOfSlot(menu, slot));
     }
 
     /**
@@ -488,7 +670,7 @@ public final class InventoryRangeSelectionHandler {
                 point.x(),
                 point.y(),
                 nearestDistance,
-                nearestSlot.index,
+                menuIndexOfSlot(screen.getMenu(), nearestSlot),
                 nearestSlot.getContainerSlot()
         );
         return nearestSlot;
@@ -542,9 +724,10 @@ public final class InventoryRangeSelectionHandler {
     /**
      * Logs one intersecting slot in the compact selected-slot list format.
      *
+     * @param menu menu that owns the slot.
      * @param slot menu slot to report.
      */
-    private void logSlot(Slot slot) {
+    private void logSlot(AbstractContainerMenu menu, Slot slot) {
         ItemStack stack = slot.getItem();
         if (stack.isEmpty()) {
             return;
@@ -552,11 +735,23 @@ public final class InventoryRangeSelectionHandler {
 
         debugLog(
                 "  -> menuIndex={}, containerSlot={}, item=\"{}\", count={}",
-                slot.index,
+                menuIndexOfSlot(menu, slot),
                 slot.getContainerSlot(),
                 stack.getHoverName().getString(),
                 stack.getCount()
         );
+    }
+
+    /**
+     * Resolves a slot to its actual position in the menu slot list.
+     *
+     * @param menu menu that owns the slot list.
+     * @param slot slot object returned by screen hit testing.
+     * @return index in {@code menu.slots}, or {@code slot.index} when the slot is not present in the list.
+     */
+    private static int menuIndexOfSlot(AbstractContainerMenu menu, Slot slot) {
+        int menuIndex = menu.slots.indexOf(slot);
+        return menuIndex >= 0 ? menuIndex : slot.index;
     }
 
     /**
@@ -709,5 +904,22 @@ public final class InventoryRangeSelectionHandler {
         double dx = Math.max(Math.max(left - point.x(), 0.0), point.x() - right);
         double dy = Math.max(Math.max(top - point.y(), 0.0), point.y() - bottom);
         return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    /**
+     * Delayed feedback state for transfers whose destination changes may arrive from the server later.
+     *
+     * @param menuId menu id that started the transfer.
+     * @param beforeDestinationSnapshots destination counts captured before dispatch.
+     * @param remainingTicks number of client ticks left before the transfer is treated as ignored.
+     */
+    private record PendingTransferFeedback(
+            int menuId,
+            List<ClientInventoryTransferDispatcher.DestinationSlotSnapshot> beforeDestinationSnapshots,
+            int remainingTicks
+    ) {
+        private PendingTransferFeedback {
+            beforeDestinationSnapshots = List.copyOf(beforeDestinationSnapshots);
+        }
     }
 }

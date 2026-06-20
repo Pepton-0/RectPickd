@@ -18,7 +18,7 @@ import org.slf4j.Logger;
  */
 public final class RectPickNetworking {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final String NETWORK_VERSION = "1";
+    private static final String NETWORK_VERSION = "2";
 
     private RectPickNetworking() {
     }
@@ -47,6 +47,11 @@ public final class RectPickNetworking {
             return;
         }
 
+        if (Consts.disableServerTransferForDebug) {
+            debugLog("RectPick move payload ignored because debug client-side transfer mode is enabled");
+            return;
+        }
+
         AbstractContainerMenu menu = serverPlayer.containerMenu;
         if (menu.containerId != payload.containerId()) {
             debugLog(
@@ -57,7 +62,13 @@ public final class RectPickNetworking {
             return;
         }
 
-        InventoryTransferExecutor.serverTransfer(menu, serverPlayer, payload.targetSlotIndex(), payload.sourceSlotIndices());
+        InventoryTransferExecutor.serverTransfer(
+                menu,
+                serverPlayer,
+                payload.targetSlotIndex(),
+                payload.targetAe2Storage(),
+                payload.sourceSlots()
+        );
     }
 
     /**

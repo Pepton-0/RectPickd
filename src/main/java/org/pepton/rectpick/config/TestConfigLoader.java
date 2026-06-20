@@ -7,28 +7,23 @@ import org.lwjgl.glfw.GLFW;
  */
 public final class TestConfigLoader implements IConfigLoader {
     @Override
-    public String getPickKeyTranslationKey() {
-        return "key.rectpick.pick";
-    }
-
-    @Override
-    public String getKeyCategoryTranslationKey() {
-        return "key.categories.rectpick";
-    }
-
-    @Override
     public int getDefaultPickKey() {
-        return GLFW.GLFW_KEY_LEFT_ALT;
+        return GLFW.GLFW_KEY_C;
     }
 
     @Override
     public double getMoveOperationMaxDragDistance() {
-        return 4.0;
+        return 20;
     }
 
     @Override
     public int getSelectionOutlineColor() {
         return 0xCC3399FF;
+    }
+
+    @Override
+    public int getSelectionFillColor() {
+        return 0x333399FF;
     }
 
     @Override
@@ -38,21 +33,21 @@ public final class TestConfigLoader implements IConfigLoader {
 
     @Override
     public int getMovedSlotFillColor() {
-        return 0xAA66CCFF;
+        return 0x993399FF;
     }
 
     @Override
     public double getSelectedSlotFadeInSeconds() {
-        return 0.25;
+        return 0.3;
     }
 
     @Override
     public double getMovedSlotHoldSeconds() {
-        return 1.5;
+        return 0.1;
     }
 
     @Override
     public double getMovedSlotFadeOutSeconds() {
-        return 1.5;
+        return 0.3;
     }
 }

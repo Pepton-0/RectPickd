@@ -1,6 +1,8 @@
 package org.pepton.rectpick.client;
 
+import com.mojang.blaze3d.platform.Window;
 import java.util.List;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.inventory.Slot;
@@ -39,21 +41,6 @@ public final class RectPickSelectionRenderer {
         this.selecting = true;
         this.startPos = startPos;
         this.endPos = startPos;
-    }
-
-    /**
-     * Updates the active rectangle selection endpoints.
-     *
-     * @param startPos GUI-scaled selection start point; must not be {@code null}.
-     * @param currentEndPos GUI-scaled current mouse point; must not be {@code null}.
-     */
-    public void updateSelection(GuiPoint startPos, GuiPoint currentEndPos) {
-        if (!selecting) {
-            return;
-        }
-
-        this.startPos = startPos;
-        this.endPos = currentEndPos;
     }
 
     /**
@@ -128,9 +115,21 @@ public final class RectPickSelectionRenderer {
         }
 
         GuiGraphics guiGraphics = event.getGuiGraphics();
+        updateActiveSelectionEndFromMouse();
         drawSelectedSlotHighlights(guiGraphics, screen);
         drawMovedSlotHighlights(guiGraphics, screen);
         drawActiveSelectionOutline(guiGraphics);
+    }
+
+    /**
+     * Updates the visual-only selection end point from the current mouse position.
+     */
+    private void updateActiveSelectionEndFromMouse() {
+        if (!selecting) {
+            return;
+        }
+
+        endPos = currentGuiMousePosition();
     }
 
     /**
@@ -211,7 +210,24 @@ public final class RectPickSelectionRenderer {
         }
 
         GuiRect rect = GuiRect.fromTwoPoints(startPos, endPos);
+        drawFill(guiGraphics, rect, Consts.get().selectionFillColor());
         drawOutline(guiGraphics, rect, Consts.get().selectionOutlineColor(), 1);
+    }
+
+    /**
+     * Draws a filled rectangle.
+     */
+    private static void drawFill(GuiGraphics guiGraphics, GuiRect rect, int color) {
+        int left = floorToInt(rect.left());
+        int top = floorToInt(rect.top());
+        int right = ceilToInt(rect.right());
+        int bottom = ceilToInt(rect.bottom());
+
+        if (right <= left || bottom <= top) {
+            return;
+        }
+
+        guiGraphics.fill(left, top, right, bottom, color);
     }
 
     /**
@@ -260,5 +276,20 @@ public final class RectPickSelectionRenderer {
 
     private static int ceilToInt(double value) {
         return (int) Math.ceil(value);
+    }
+
+    /**
+     * Reads the current raw mouse position and converts it to GUI-scaled coordinates.
+     *
+     * @return current mouse position in GUI-scaled screen space.
+     */
+    private static GuiPoint currentGuiMousePosition() {
+        Minecraft minecraft = Minecraft.getInstance();
+        Window window = minecraft.getWindow();
+        double rawX = minecraft.mouseHandler.xpos();
+        double rawY = minecraft.mouseHandler.ypos();
+        double guiX = rawX * window.getGuiScaledWidth() / window.getScreenWidth();
+        double guiY = rawY * window.getGuiScaledHeight() / window.getScreenHeight();
+        return new GuiPoint(guiX, guiY);
     }
 }

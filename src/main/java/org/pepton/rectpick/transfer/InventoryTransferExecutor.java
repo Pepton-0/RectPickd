@@ -11,17 +11,22 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.fml.ModList;
+import org.pepton.rectpick.api.Ae2Api;
 import org.pepton.rectpick.config.Consts;
+import org.pepton.rectpick.network.MoveItemsPayload;
 import org.slf4j.Logger;
 
 /**
  * Server/common transfer planner and executor for RectPick.
  * <p>
  * Client-only code may reuse the plan builder, while server code uses
- * {@link #serverTransfer(AbstractContainerMenu, ServerPlayer, int, List)} to mutate inventories directly.
+ * {@link #serverTransfer(AbstractContainerMenu, ServerPlayer, int, boolean, List)} to mutate inventories directly.
  */
 public final class InventoryTransferExecutor {
     private static final Logger LOGGER = LogUtils.getLogger();
+    private static final String CREATIVE_COPY_SOURCE_SLOT_CLASS_NAME =
+            "net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen$CustomCreativeSlot";
 
     private InventoryTransferExecutor() {
     }
@@ -32,10 +37,25 @@ public final class InventoryTransferExecutor {
      * @param menu open menu owned by {@code player}; its container id has already been validated.
      * @param player server player requesting the move; used for pickup checks and slot take callbacks.
      * @param targetSlotIndex menu slot index whose inventory becomes the destination.
-     * @param sourceSlotIndices selected source menu slot indices; invalid, empty, or destination-inventory slots are skipped.
+     * @param targetAe2Storage whether the client selected AE2 terminal storage as the destination.
+     * @param sourceSlots selected source slots; invalid, empty, or destination-inventory slots are skipped.
      * @return total item count moved into the destination inventory.
      */
-    public static int serverTransfer(AbstractContainerMenu menu, ServerPlayer player, int targetSlotIndex, List<Integer> sourceSlotIndices) {
+    public static int serverTransfer(
+            AbstractContainerMenu menu,
+            ServerPlayer player,
+            int targetSlotIndex,
+            boolean targetAe2Storage,
+            List<MoveItemsPayload.SourceSlot> sourceSlots
+    ) {
+        List<Integer> sourceSlotIndices = sourceSlots.stream()
+                .map(MoveItemsPayload.SourceSlot::slotIndex)
+                .toList();
+
+        if (isAe2Loaded() && Ae2Api.shouldHandleServerTransfer(menu, targetSlotIndex, targetAe2Storage, sourceSlots)) {
+            return Ae2Api.serverTransfer(menu, player, targetSlotIndex, targetAe2Storage, sourceSlots);
+        }
+
         InventoryTransferPlan plan = createPlan(menu, targetSlotIndex, sourceSlotIndices);
         if (plan == null) {
             return 0;
@@ -129,6 +149,25 @@ public final class InventoryTransferExecutor {
     }
 
     /**
+     * Checks whether a slot is a client-only creative tab source slot that should be copied instead of moved.
+     *
+     * @param slot menu slot to inspect.
+     * @return {@code true} when the slot is the creative item-list slot implementation.
+     */
+    public static boolean isCreativeCopySourceSlot(Slot slot) {
+        return slot != null && CREATIVE_COPY_SOURCE_SLOT_CLASS_NAME.equals(slot.getClass().getName());
+    }
+
+    /**
+     * Checks whether AE2 is loaded before touching classes that directly depend on AE2's API.
+     *
+     * @return {@code true} when the AE2 mod is present in the current runtime.
+     */
+    private static boolean isAe2Loaded() {
+        return ModList.get().isLoaded("ae2");
+    }
+
+    /**
      * Groups source slots by their backing inventory while preserving first-seen inventory order.
      *
      * @param sourceSlots source slots already filtered to movable non-destination slots.
@@ -187,6 +226,23 @@ public final class InventoryTransferExecutor {
         public InventoryTransferPlan {
             destinationSlots = List.copyOf(Objects.requireNonNull(destinationSlots));
             sourceInventories = List.copyOf(Objects.requireNonNull(sourceInventories));
+        }
+
+        /**
+         * Checks whether this plan includes creative tab source slots that require copy semantics.
+         *
+         * @return {@code true} when at least one source slot is a creative item-list slot.
+         */
+        public boolean containsCreativeSourceSlots() {
+            for (SourceInventoryTransfer sourceInventory : sourceInventories) {
+                for (Slot sourceSlot : sourceInventory.sourceSlots()) {
+                    if (isCreativeCopySourceSlot(sourceSlot)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
     }
 

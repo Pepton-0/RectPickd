@@ -42,6 +42,30 @@ public final class InventoryItemMover {
     }
 
     /**
+     * Copies as much of one mutable stack as possible into destination slots without changing a source inventory.
+     *
+     * @param nextInventory destination inventory that owns every slot in {@code destinationSlots}.
+     * @param copiedStack mutable stack copy; it is shrunk by the copied amount.
+     * @param destinationSlots destination slots ordered by insertion priority and filtered to the destination inventory.
+     * @return number of items removed from {@code copiedStack} and inserted into destination slots.
+     */
+    public static int copyItemStack(Container nextInventory, ItemStack copiedStack, List<Slot> destinationSlots) {
+        if (copiedStack.isEmpty()) {
+            return 0;
+        }
+
+        int beforeCount = copiedStack.getCount();
+        moveIntoExistingStacks(nextInventory, copiedStack, destinationSlots);
+        moveIntoEmptySlots(nextInventory, copiedStack, destinationSlots);
+
+        if (copiedStack.getCount() != beforeCount) {
+            nextInventory.setChanged();
+        }
+
+        return beforeCount - copiedStack.getCount();
+    }
+
+    /**
      * Checks whether a destination slot can accept the supplied stack.
      *
      * @param destinationSlot slot being tested; must be active and belong to {@code nextInventory}.

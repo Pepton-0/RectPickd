@@ -8,20 +8,6 @@ package org.pepton.rectpick.config;
  */
 public interface IConfigLoader {
     /**
-     * Returns the translation key for the rectangle pick key mapping.
-     *
-     * @return a non-empty language key such as {@code key.rectpick.pick}.
-     */
-    String getPickKeyTranslationKey();
-
-    /**
-     * Returns the controls category translation key used by the key mapping.
-     *
-     * @return a non-empty language key such as {@code key.categories.rectpick}.
-     */
-    String getKeyCategoryTranslationKey();
-
-    /**
      * Returns the default GLFW key code for the pick key.
      *
      * @return a GLFW keyboard key code compatible with {@code InputConstants.Type.KEYSYM}.
@@ -41,6 +27,13 @@ public interface IConfigLoader {
      * @return ARGB color value.
      */
     int getSelectionOutlineColor();
+
+    /**
+     * Returns the ARGB fill color for the active selection rectangle.
+     *
+     * @return ARGB color value.
+     */
+    int getSelectionFillColor();
 
     /**
      * Returns the ARGB fill color for selected source slot backgrounds.
