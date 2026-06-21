@@ -32,14 +32,14 @@ public final class ClientOperationSounds {
      * Plays feedback for a dispatched transfer.
      */
     public static void playTransferDone() {
-        play(RectPickSoundEvents.TRANSFER_DONE.get(), 1.0F);
+        play(RectPickSoundEvents.TRANSFER_DONE.get(), 0.7F);
     }
 
     /**
      * Plays feedback for an empty selection or missing transfer target.
      */
     public static void playOperationIgnored() {
-        play(RectPickSoundEvents.OPERATION_IGNORED.get(), 0.7F);
+        play(RectPickSoundEvents.OPERATION_IGNORED.get(), 1.0F);
     }
 
     /**

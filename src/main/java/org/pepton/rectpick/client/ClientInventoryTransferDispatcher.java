@@ -83,12 +83,12 @@ public final class ClientInventoryTransferDispatcher {
     }
 
     /**
-     * Dispatches AE2 terminal transfers before normal slot-inventory planning.
+     * Dispatches AE2 terminal storage transfers before normal slot-inventory planning.
      *
      * @param menu current menu whose client slots may include AE2 terminal storage entries.
      * @param targetSlotIndex menu slot index selected as transfer destination.
      * @param sourceSlotIndices selected source slot indices.
-     * @return transferred result when an AE2 server request was sent, otherwise a failed result.
+     * @return transferred result when AE2 storage handling started, otherwise a failed result.
      */
     private static TransferDispatchResult tryAe2TerminalTransfer(AbstractContainerMenu menu, int targetSlotIndex, List<Integer> sourceSlotIndices) {
         if (!ModList.get().isLoaded("ae2") || !Ae2Api.isTerminalMenu(menu)) {
@@ -98,28 +98,23 @@ public final class ClientInventoryTransferDispatcher {
         boolean targetAe2Storage = Ae2Api.isStorageTarget(menu, targetSlotIndex);
         boolean sourceAe2Storage = sourceSlotIndices.stream()
                 .anyMatch(sourceSlotIndex -> Ae2Api.isStorageTarget(menu, sourceSlotIndex));
+        if (!targetAe2Storage && !sourceAe2Storage) {
+            return TransferDispatchResult.notTransferred();
+        }
+
         debugLog(
-                "RectPick AE2 terminal candidate: target={}, targetStorage={}, sourceStorage={}, sources={}",
+                "RectPick AE2 terminal transfer candidate: target={}, targetStorage={}, sourceStorage={}, sources={}",
                 targetSlotIndex,
                 targetAe2Storage,
                 sourceAe2Storage,
                 sourceSlotIndices
         );
-        if (!targetAe2Storage && !sourceAe2Storage) {
-            return TransferDispatchResult.notTransferred();
-        }
 
         List<DestinationSlotSnapshot> beforeSnapshots = targetAe2Storage
                 ? snapshotSlots(menu, sourceSlotIndices)
                 : snapshotTargetInventorySlots(menu, targetSlotIndex);
         if (Consts.disableServerTransferForDebug) {
             if (clientFallbackAe2TerminalTransfer(menu, targetSlotIndex, sourceSlotIndices, targetAe2Storage)) {
-                debugLog(
-                        "RectPick AE2 client fallback transfer started: target={}, targetStorage={}, sources={}",
-                        targetSlotIndex,
-                        targetAe2Storage,
-                        sourceSlotIndices
-                );
                 return new TransferDispatchResult(true, false, true, List.of(), beforeSnapshots);
             }
 
@@ -127,12 +122,6 @@ public final class ClientInventoryTransferDispatcher {
         }
 
         if (tryServerTransfer(menu, targetSlotIndex, targetAe2Storage, sourceSlotIndices)) {
-            debugLog(
-                    "RectPick sent AE2 terminal transfer request: target={}, targetStorage={}, sources={}",
-                    targetSlotIndex,
-                    targetAe2Storage,
-                    sourceSlotIndices
-            );
             return new TransferDispatchResult(true, false, true, List.of(), beforeSnapshots);
         }
 
@@ -140,13 +129,13 @@ public final class ClientInventoryTransferDispatcher {
     }
 
     /**
-     * Uses normal client click operations for AE2 terminal transfers while RectPick server transfer is disabled.
+     * Uses menu-backed client interactions for AE2 terminal storage transfers.
      *
      * @param menu current AE2 terminal menu.
      * @param targetSlotIndex target menu slot selected by the user.
      * @param sourceSlotIndices selected source menu slot indices.
      * @param targetAe2Storage {@code true} to insert normal source slots into AE2 storage.
-     * @return {@code true} when at least one click sequence was attempted.
+     * @return {@code true} when at least one interaction was attempted.
      */
     private static boolean clientFallbackAe2TerminalTransfer(
             AbstractContainerMenu menu,
@@ -161,26 +150,21 @@ public final class ClientInventoryTransferDispatcher {
         }
 
         if (targetAe2Storage) {
-            return clickNormalSlotsIntoAe2Storage(minecraft, menu, targetSlotIndex, sourceSlotIndices);
+            return quickMoveNormalSlotsIntoAe2Storage(minecraft, menu, sourceSlotIndices);
         }
 
-        return clickAe2StorageIntoTargetInventory(menu, sourceSlotIndices);
+        return shiftClickAe2StorageIntoPlayerInventory(menu, sourceSlotIndices);
     }
 
     /**
-     * Quick-moves normal source slots into AE2 storage.
+     * Quick-moves normal source slots into AE2 storage through the client's menu click path.
      *
      * @param minecraft active client instance.
      * @param menu current AE2 terminal menu.
-     * @param targetSlotIndex AE2 storage target slot index, used only to ensure the target is still valid.
      * @param sourceSlotIndices selected source slot indices.
      * @return {@code true} when at least one source slot was clicked.
      */
-    private static boolean clickNormalSlotsIntoAe2Storage(Minecraft minecraft, AbstractContainerMenu menu, int targetSlotIndex, List<Integer> sourceSlotIndices) {
-        if (!menu.isValidSlotIndex(targetSlotIndex)) {
-            return false;
-        }
-
+    private static boolean quickMoveNormalSlotsIntoAe2Storage(Minecraft minecraft, AbstractContainerMenu menu, List<Integer> sourceSlotIndices) {
         boolean clickedAny = false;
         for (int sourceSlotIndex : sourceSlotIndices) {
             if (!menu.isValidSlotIndex(sourceSlotIndex) || Ae2Api.isStorageTarget(menu, sourceSlotIndex)) {
@@ -200,13 +184,13 @@ public final class ClientInventoryTransferDispatcher {
     }
 
     /**
-     * Invokes AE2 storage interactions for source entries so AE2 moves them into the player inventory.
+     * Shift-clicks AE2 storage entries through AE2's terminal interaction handler.
      *
      * @param menu current AE2 terminal menu.
      * @param sourceSlotIndices selected AE2 storage source slot indices.
      * @return {@code true} when at least one source storage entry was clicked.
      */
-    private static boolean clickAe2StorageIntoTargetInventory(AbstractContainerMenu menu, List<Integer> sourceSlotIndices) {
+    private static boolean shiftClickAe2StorageIntoPlayerInventory(AbstractContainerMenu menu, List<Integer> sourceSlotIndices) {
         boolean clickedAny = false;
 
         for (int sourceSlotIndex : sourceSlotIndices) {
@@ -394,7 +378,7 @@ public final class ClientInventoryTransferDispatcher {
                 if (InventoryTransferExecutor.isCreativeCopySourceSlot(sourceSlot)) {
                     copyCreativeClientSlot(minecraft, sourceSlot, plan.destinationInventory(), plan.destinationSlots(), stackUnitTransfer);
                 } else {
-                    moveClientSlot(minecraft, menu, sourceInventory.sourceInventory(), sourceSlot, plan.destinationInventory(), plan.destinationSlots());
+                    moveClientSlot(minecraft, menu, sourceInventory.sourceInventory(), sourceSlot, plan.destinationInventory(), plan.destinationSlots(), menu.getSlot(targetSlotIndex));
                 }
             }
         }
@@ -586,20 +570,78 @@ public final class ClientInventoryTransferDispatcher {
      * @param sourceSlot slot to pick up from; must contain an item and be pickup-allowed.
      * @param destinationInventory inventory that should receive items.
      * @param destinationSlots active slots belonging to {@code destinationInventory}, ordered by container slot index.
+     * @param targetSlot exact target slot selected by the user; used for menu-managed filter slots when normal placement checks reject insertion.
      */
-    private static void moveClientSlot(Minecraft minecraft, AbstractContainerMenu menu, Container sourceInventory, Slot sourceSlot, Container destinationInventory, List<Slot> destinationSlots) {
+    private static void moveClientSlot(
+            Minecraft minecraft,
+            AbstractContainerMenu menu,
+            Container sourceInventory,
+            Slot sourceSlot,
+            Container destinationInventory,
+            List<Slot> destinationSlots,
+            Slot targetSlot
+    ) {
         if (!sourceSlot.hasItem() || !sourceSlot.mayPickup(minecraft.player) || sourceSlot.container != sourceInventory || sourceInventory == destinationInventory) {
             return;
         }
 
         int sourceSlotIndex = menuIndexOfSlot(menu, sourceSlot);
+        if (shouldUseMenuQuickMoveFallback(minecraft, targetSlot, destinationInventory, destinationSlots, sourceSlot.getItem())) {
+            minecraft.gameMode.handleInventoryMouseClick(menu.containerId, sourceSlotIndex, 0, ClickType.QUICK_MOVE, minecraft.player);
+            return;
+        }
+
         minecraft.gameMode.handleInventoryMouseClick(menu.containerId, sourceSlotIndex, 0, ClickType.PICKUP, minecraft.player);
         moveCarriedStackWithClicks(minecraft, menu, destinationInventory, destinationSlots, false);
         moveCarriedStackWithClicks(minecraft, menu, destinationInventory, destinationSlots, true);
+        clickTargetSlotWhenStillCarrying(minecraft, menu, destinationInventory, targetSlot);
 
         if (!menu.getCarried().isEmpty()) {
             minecraft.gameMode.handleInventoryMouseClick(menu.containerId, sourceSlotIndex, 0, ClickType.PICKUP, minecraft.player);
         }
+    }
+
+    /**
+     * Checks whether the target looks like a menu-managed filter slot that should be reached through quick-move.
+     *
+     * @param minecraft active client instance; must have non-null player.
+     * @param targetSlot exact target slot selected by the user.
+     * @param destinationInventory inventory represented by the transfer target.
+     * @param destinationSlots candidate destination slots from the same target inventory.
+     * @param sourceStack stack being moved from the source slot.
+     * @return {@code true} when normal placement is rejected and the target cannot be picked up like a real slot.
+     */
+    private static boolean shouldUseMenuQuickMoveFallback(
+            Minecraft minecraft,
+            Slot targetSlot,
+            Container destinationInventory,
+            List<Slot> destinationSlots,
+            ItemStack sourceStack
+    ) {
+        return targetSlot.container == destinationInventory
+                && !InventoryItemMover.canAcceptStack(targetSlot, destinationInventory, sourceStack)
+                && destinationSlots.stream().noneMatch(destinationSlot -> InventoryItemMover.canAcceptStack(destinationSlot, destinationInventory, sourceStack))
+                && !targetSlot.mayPickup(minecraft.player);
+    }
+
+    /**
+     * Gives the exact user-selected destination slot a chance to handle special menu behavior.
+     *
+     * @param minecraft active client instance; must have non-null player and game mode.
+     * @param menu current menu containing the target slot.
+     * @param destinationInventory inventory represented by the transfer target.
+     * @param targetSlot exact target slot selected by the user.
+     */
+    private static void clickTargetSlotWhenStillCarrying(Minecraft minecraft, AbstractContainerMenu menu, Container destinationInventory, Slot targetSlot) {
+        if (menu.getCarried().isEmpty() || targetSlot.container != destinationInventory) {
+            return;
+        }
+
+        if (InventoryItemMover.canAcceptStack(targetSlot, destinationInventory, menu.getCarried())) {
+            return;
+        }
+
+        minecraft.gameMode.handleInventoryMouseClick(menu.containerId, menuIndexOfSlot(menu, targetSlot), 0, ClickType.PICKUP, minecraft.player);
     }
 
     /**

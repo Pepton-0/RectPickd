@@ -18,7 +18,7 @@ import org.slf4j.Logger;
  */
 public final class RectPickNetworking {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final String NETWORK_VERSION = "2";
+    private static final String NETWORK_VERSION = "1";
 
     private RectPickNetworking() {
     }

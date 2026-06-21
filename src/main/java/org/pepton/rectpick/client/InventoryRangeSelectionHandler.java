@@ -548,7 +548,17 @@ public final class InventoryRangeSelectionHandler {
      * @return active slot under or near {@code end} or {@code start}, or {@code null} when no inventory is close enough.
      */
     private Slot findTransferTargetSlot(AbstractContainerScreen<?> screen, GuiPoint start, GuiPoint end) {
-        Slot targetSlot = findSlotAt(screen, end);
+        Slot targetSlot = findNearestAe2StorageSlot(screen, end);
+        if (targetSlot != null) {
+            return targetSlot;
+        }
+
+        targetSlot = findNearestAe2StorageSlot(screen, start);
+        if (targetSlot != null) {
+            return targetSlot;
+        }
+
+        targetSlot = findSlotAt(screen, end);
         if (targetSlot != null) {
             return targetSlot;
         }
@@ -596,7 +606,6 @@ public final class InventoryRangeSelectionHandler {
      * @return active slot containing the point, or {@code null} when no slot contains it.
      */
     private Slot findSlotAt(AbstractContainerScreen<?> screen, GuiPoint point) {
-        Slot firstHit = null;
         for (Slot slot : screen.getMenu().slots) {
             if (!slot.isActive()) {
                 continue;
@@ -611,27 +620,74 @@ public final class InventoryRangeSelectionHandler {
                 continue;
             }
 
-            if (isAe2StorageSlot(screen.getMenu(), slot)) {
-                return slot;
-            }
-
-            if (firstHit == null) {
-                firstHit = slot;
-            }
+            return slot;
         }
 
-        return firstHit;
+        return null;
     }
 
     /**
-     * Checks whether a slot represents AE2 terminal storage and should win hit-test ties.
+     * Finds the nearest AE2 terminal storage slot using one synthetic storage-area bounds.
      *
-     * @param menu menu that owns the slot.
-     * @param slot slot hit by the cursor.
-     * @return {@code true} when AE2 is loaded and the slot points at terminal storage.
+     * @param screen container screen whose menu may be an AE2 terminal.
+     * @param point GUI-scaled point that may be in a frame between storage slots.
+     * @return nearest AE2 storage slot, or {@code null} when the point is outside the storage snap area.
      */
-    private boolean isAe2StorageSlot(AbstractContainerMenu menu, Slot slot) {
-        return ModList.get().isLoaded("ae2") && Ae2Api.isStorageTarget(menu, menuIndexOfSlot(menu, slot));
+    private Slot findNearestAe2StorageSlot(AbstractContainerScreen<?> screen, GuiPoint point) {
+        if (!ModList.get().isLoaded("ae2") || !Ae2Api.isTerminalMenu(screen.getMenu())) {
+            return null;
+        }
+
+        StorageSlotBounds storageBounds = collectAe2StorageBounds(screen);
+        if (storageBounds == null) {
+            return null;
+        }
+
+        double distance = storageBounds.distanceTo(point);
+        if (distance > Consts.transferTargetSnapDistance) {
+            return null;
+        }
+
+        Slot nearestSlot = storageBounds.nearestSlotTo(point);
+        if (nearestSlot == null) {
+            return null;
+        }
+
+        debugLog(
+                "RectPick transfer target snapped to AE2 storage area: mouse=({}, {}), distance={}, targetMenuSlot={}, targetContainerSlot={}",
+                point.x(),
+                point.y(),
+                distance,
+                menuIndexOfSlot(screen.getMenu(), nearestSlot),
+                nearestSlot.getContainerSlot()
+        );
+        return nearestSlot;
+    }
+
+    /**
+     * Collects AE2 terminal storage slots into one screen-space area that includes frames between slots.
+     *
+     * @param screen container screen whose menu may contain AE2 storage slots.
+     * @return storage-area bounds, or {@code null} when no AE2 storage slots are visible.
+     */
+    private StorageSlotBounds collectAe2StorageBounds(AbstractContainerScreen<?> screen) {
+        StorageSlotBounds storageBounds = null;
+
+        for (Slot slot : screen.getMenu().slots) {
+            if (!slot.isActive() || !Ae2Api.isStorageTarget(screen.getMenu(), menuIndexOfSlot(screen.getMenu(), slot))) {
+                continue;
+            }
+
+            if (storageBounds == null) {
+                storageBounds = new StorageSlotBounds();
+            }
+
+            double slotLeft = screen.getGuiLeft() + slot.x;
+            double slotTop = screen.getGuiTop() + slot.y;
+            storageBounds.includeSlot(slot, slotLeft, slotTop, slotLeft + SLOT_SIZE, slotTop + SLOT_SIZE);
+        }
+
+        return storageBounds;
     }
 
     /**
@@ -648,7 +704,11 @@ public final class InventoryRangeSelectionHandler {
 
         for (InventoryBounds inventory : inventories) {
             double distance = inventory.distanceTo(point);
-            if (distance > Consts.transferTargetSnapDistance || distance >= nearestDistance) {
+            if (distance > Consts.transferTargetSnapDistance) {
+                continue;
+            }
+
+            if (distance >= nearestDistance) {
                 continue;
             }
 
@@ -850,6 +910,67 @@ public final class InventoryRangeSelectionHandler {
          *
          * @param point GUI-scaled point used for ranking slot rectangles.
          * @return nearest active slot from this inventory, or {@code null} when no slot was collected.
+         */
+        private Slot nearestSlotTo(GuiPoint point) {
+            SlotBounds nearestSlot = null;
+            double nearestDistance = Double.POSITIVE_INFINITY;
+
+            for (SlotBounds slot : slots) {
+                double distance = slot.distanceTo(point);
+                if (distance >= nearestDistance) {
+                    continue;
+                }
+
+                nearestSlot = slot;
+                nearestDistance = distance;
+            }
+
+            return nearestSlot == null ? null : nearestSlot.slot();
+        }
+    }
+
+    /**
+     * Mutable bounding box for AE2 storage slots that are not represented as one normal backing container.
+     */
+    private static final class StorageSlotBounds {
+        private final List<SlotBounds> slots = new ArrayList<>();
+        private double left = Double.POSITIVE_INFINITY;
+        private double top = Double.POSITIVE_INFINITY;
+        private double right = Double.NEGATIVE_INFINITY;
+        private double bottom = Double.NEGATIVE_INFINITY;
+
+        /**
+         * Expands this storage bounds with one visible AE2 storage slot.
+         *
+         * @param slot AE2 storage menu slot.
+         * @param slotLeft screen-space left edge.
+         * @param slotTop screen-space top edge.
+         * @param slotRight screen-space right edge.
+         * @param slotBottom screen-space bottom edge.
+         */
+        private void includeSlot(Slot slot, double slotLeft, double slotTop, double slotRight, double slotBottom) {
+            slots.add(new SlotBounds(slot, slotLeft, slotTop, slotRight, slotBottom));
+            left = Math.min(left, slotLeft);
+            top = Math.min(top, slotTop);
+            right = Math.max(right, slotRight);
+            bottom = Math.max(bottom, slotBottom);
+        }
+
+        /**
+         * Calculates shortest distance from a point to this storage bounds.
+         *
+         * @param point GUI-scaled point to test.
+         * @return zero when inside the storage area, otherwise Euclidean distance to the nearest edge or corner.
+         */
+        private double distanceTo(GuiPoint point) {
+            return distanceToRect(point, left, top, right, bottom);
+        }
+
+        /**
+         * Finds the storage slot nearest to the supplied point.
+         *
+         * @param point GUI-scaled point used for ranking slot rectangles.
+         * @return nearest AE2 storage slot, or {@code null} when no slot was collected.
          */
         private Slot nearestSlotTo(GuiPoint point) {
             SlotBounds nearestSlot = null;

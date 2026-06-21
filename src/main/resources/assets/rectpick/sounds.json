@@ -10,7 +10,7 @@
   "selection_stored": {
     "sounds": [
       {
-        "name": "minecraft:block.note_block.pling",
+        "name": "minecraft:ui.button.click",
         "type": "event"
       }
     ]
@@ -26,8 +26,7 @@
   "operation_ignored": {
     "sounds": [
       {
-        "name": "minecraft:ui.button.click",
-        "type": "event"
+        "name": "rectpick:ignored"
       }
     ]
   }

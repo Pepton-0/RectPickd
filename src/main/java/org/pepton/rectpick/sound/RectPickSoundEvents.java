@@ -11,8 +11,8 @@ import org.pepton.rectpick.Main;
 /**
  * Registry holder for RectPick operation sound events.
  * <p>
- * Sound definitions live in {@code assets/rectpick/sounds.json}; the current
- * definitions reference vanilla sounds so no bundled ogg assets are required.
+ * Sound definitions live in {@code assets/rectpick/sounds.json}; bundled audio
+ * assets are stored under {@code assets/rectpick/sounds}.
  */
 public final class RectPickSoundEvents {
     private static final DeferredRegister<SoundEvent> SOUND_EVENTS = DeferredRegister.create(Registries.SOUND_EVENT, Main.MOD_ID);
