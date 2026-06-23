@@ -9,6 +9,7 @@ Compatible with Creative Tab, AE2 Terminal, Filter inventory like List filter of
 
 By default, drag-and-drop with C selects items in an area, and pressing C on another inventory moves the items.
 
-<div><video controls src="https://youtu.be/QKC9RpVrkxI" muted="false"></video></div>
+Demo<br>
+https://youtu.be/QKC9RpVrkxI
 
 If you are scared of any virus from here, then I think compiling codes by yourself is the best choice.<br>
